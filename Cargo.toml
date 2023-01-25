@@ -2,6 +2,13 @@
 name = "s-expression"
 version = "0.1.0"
 edition = "2021"
+description = "A simple S-Expression parser"
+license = "MIT"
+repository = "https://github.com/eckertliam/s-expression"
+readme = "README.md"
 
+[lib]
+name = "sexpression"
+path = "src/lib.rs"
 
 [dependencies]
