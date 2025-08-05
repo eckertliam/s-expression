@@ -10,6 +10,7 @@
 //! - **Fast-path optimizations**: Optimized number parsing and single-character symbols
 //! - **Production error handling**: Proper error types instead of panics
 //! - **Memory efficient**: Pre-allocated vectors and optimized tokenization
+//! - **Custom symbol types**: Trait-based system for custom symbol representations in owned expressions
 //! 
 //! # Example
 //! 
@@ -22,6 +23,106 @@
 //!     Err(e) => eprintln!("Parse error: {}", e),
 //! }
 //! ```
+
+use std::fmt;
+
+/// Trait for custom symbol types in owned S-expressions.
+/// 
+/// This trait allows users to define custom symbol representations for owned
+/// expressions while maintaining the zero-copy performance characteristics of
+/// the parser for borrowed expressions.
+/// 
+/// # Examples
+/// 
+/// ```rust
+/// use sexpression::{OwnedSymbol, OwnedExpression};
+/// use std::fmt;
+/// 
+/// #[derive(Debug, Clone, PartialEq)]
+/// struct CustomSymbol {
+///     name: String,
+///     namespace: Option<String>,
+/// }
+/// 
+/// impl OwnedSymbol for CustomSymbol {
+///     fn from_str(s: &str) -> Self {
+///         if let Some((ns, name)) = s.split_once("::") {
+///             CustomSymbol {
+///                 name: name.to_string(),
+///                 namespace: Some(ns.to_string()),
+///             }
+///         } else {
+///             CustomSymbol {
+///                 name: s.to_string(),
+///                 namespace: None,
+///             }
+///         }
+///     }
+///     
+///     fn display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+///         match &self.namespace {
+///             Some(ns) => write!(f, "{}::{}", ns, self.name),
+///             None => write!(f, "{}", self.name),
+///         }
+///     }
+/// }
+/// 
+/// // Use with custom symbol type
+/// let expr = OwnedExpression::<CustomSymbol>::Symbol(CustomSymbol::from_str("std::vector"));
+/// ```
+pub trait OwnedSymbol: Sized + fmt::Debug + Clone + PartialEq {
+    /// Create a symbol from a string slice.
+    /// 
+    /// This method should provide efficient conversion from the raw token
+    /// string to the custom symbol type.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `s` - The string slice representing the symbol
+    /// 
+    /// # Returns
+    /// 
+    /// The custom symbol instance
+    fn from_str(s: &str) -> Self;
+    
+    /// Display the symbol in a human-readable format.
+    /// 
+    /// This method should format the symbol for display purposes,
+    /// typically showing the same representation that would be used
+    /// in source code.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `f` - The formatter to write to
+    /// 
+    /// # Returns
+    /// 
+    /// A `fmt::Result` indicating success or failure
+    fn display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
+}
+
+/// Default string-based symbol implementation for owned expressions.
+/// 
+/// This provides the standard string-based symbol representation
+/// used by the default owned expression parser.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StringOwnedSymbol(String);
+
+impl OwnedSymbol for StringOwnedSymbol {
+    fn from_str(s: &str) -> Self {
+        StringOwnedSymbol(s.to_string())
+    }
+    
+    fn display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for StringOwnedSymbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.display(f)
+    }
+}
 
 // Zero-copy Expression that borrows from source
 /// Represents an S-expression as a borrowed data structure.
@@ -64,34 +165,78 @@ pub enum Expression<'a> {
     Null,
 }
 
-/// Owned version of Expression for when you need ownership.
+impl<'a> fmt::Display for Expression<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expression::Number(n) => write!(f, "{}", n),
+            Expression::Bool(b) => write!(f, "{}", b),
+            Expression::Str(s) => write!(f, "\"{}\"", s),
+            Expression::Symbol(s) => write!(f, "{}", s),
+            Expression::List(list) => {
+                write!(f, "(")?;
+                for (i, expr) in list.iter().enumerate() {
+                    if i > 0 { write!(f, " ")?; }
+                    write!(f, "{}", expr)?;
+                }
+                write!(f, ")")
+            }
+            Expression::Null => write!(f, "null"),
+        }
+    }
+}
+
+/// Owned version of Expression with custom symbol support.
 /// 
 /// This is useful when you need to store expressions independently of the
 /// original source string, or when you need to modify the expressions.
+/// The symbol type is generic, allowing for custom symbol representations.
 /// 
 /// # Examples
 /// 
 /// ```rust
-/// use sexpression::{Expression, OwnedExpression};
+/// use sexpression::{OwnedExpression, StringOwnedSymbol, OwnedSymbol, Expression};
 /// 
+/// // With default string symbols
+/// let expr = OwnedExpression::<StringOwnedSymbol>::Symbol(StringOwnedSymbol::from_str("hello"));
+/// 
+/// // Convert from borrowed expression
 /// let borrowed = Expression::Symbol("hello");
-/// let owned: OwnedExpression = borrowed.to_owned();
-/// assert_eq!(owned, OwnedExpression::Symbol("hello".to_string()));
+/// let owned: OwnedExpression<StringOwnedSymbol> = borrowed.to_owned();
 /// ```
 #[derive(PartialEq, Debug, Clone)]
-pub enum OwnedExpression {
+pub enum OwnedExpression<S: OwnedSymbol = StringOwnedSymbol> {
     /// A numeric literal (f64)
     Number(f64),
     /// A boolean literal
     Bool(bool),
     /// A string literal (owned)
     Str(String),
-    /// A symbol/identifier (owned)
-    Symbol(String),
+    /// A symbol/identifier (custom type)
+    Symbol(S),
     /// A list of expressions
-    List(Vec<OwnedExpression>),
+    List(Vec<OwnedExpression<S>>),
     /// A null value
     Null,
+}
+
+impl<S: OwnedSymbol> fmt::Display for OwnedExpression<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OwnedExpression::Number(n) => write!(f, "{}", n),
+            OwnedExpression::Bool(b) => write!(f, "{}", b),
+            OwnedExpression::Str(s) => write!(f, "\"{}\"", s),
+            OwnedExpression::Symbol(sym) => sym.display(f),
+            OwnedExpression::List(list) => {
+                write!(f, "(")?;
+                for (i, expr) in list.iter().enumerate() {
+                    if i > 0 { write!(f, " ")?; }
+                    write!(f, "{}", expr)?;
+                }
+                write!(f, ")")
+            }
+            OwnedExpression::Null => write!(f, "null"),
+        }
+    }
 }
 
 /// Parse errors that can occur during S-expression parsing.
@@ -120,20 +265,20 @@ impl<'a> Expression<'a> {
     /// # Examples
     /// 
     /// ```rust
-    /// use sexpression::Expression;
-    /// 
-    /// let borrowed = Expression::Symbol("hello");
-    /// let owned = borrowed.to_owned();
-    /// assert_eq!(owned, sexpression::OwnedExpression::Symbol("hello".to_string()));
-    /// ```
-    pub fn to_owned(&self) -> OwnedExpression {
+/// use sexpression::{Expression, StringOwnedSymbol, OwnedSymbol, OwnedExpression};
+/// 
+/// let borrowed = Expression::Symbol("hello");
+/// let owned: OwnedExpression<StringOwnedSymbol> = borrowed.to_owned();
+/// assert_eq!(owned, OwnedExpression::Symbol(StringOwnedSymbol::from_str("hello")));
+/// ```
+    pub fn to_owned<S: OwnedSymbol>(&self) -> OwnedExpression<S> {
         match self {
             Expression::Number(n) => OwnedExpression::Number(*n),
             Expression::Bool(b) => OwnedExpression::Bool(*b),
             Expression::Str(s) => OwnedExpression::Str(s.to_string()),
-            Expression::Symbol(s) => OwnedExpression::Symbol(s.to_string()),
+            Expression::Symbol(s) => OwnedExpression::Symbol(S::from_str(s)),
             Expression::List(list) => OwnedExpression::List(
-                list.iter().map(|expr| expr.to_owned()).collect()
+                list.iter().map(|expr| expr.to_owned::<S>()).collect()
             ),
             Expression::Null => OwnedExpression::Null,
         }

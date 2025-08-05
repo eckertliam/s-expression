@@ -11,6 +11,7 @@
 //! - **Production error handling**: Proper error types instead of panics
 //! - **Memory efficient**: Pre-allocated vectors and optimized tokenization
 //! - **Compiler-friendly**: Designed for use in language compilers and interpreters
+//! - **Custom symbol types**: Trait-based system for custom symbol representations in owned expressions
 //! 
 //! # Quick Start
 //! 
@@ -30,7 +31,9 @@
 //! ## Core Types
 //! 
 //! - [`Expression`]: Zero-copy S-expression representation
-//! - [`OwnedExpression`]: Owned version for independent storage
+//! - [`OwnedExpression`]: Owned version with custom symbol support
+//! - [`OwnedSymbol`]: Trait for custom symbol types
+//! - [`StringOwnedSymbol`]: Default string-based symbol implementation
 //! - [`ParseError`]: Comprehensive error types
 //! 
 //! ## Main Functions
@@ -60,6 +63,45 @@
 //! }
 //! ```
 //! 
+//! ## Custom Symbol Types
+//! 
+//! ```rust
+//! use sexpression::{OwnedSymbol, OwnedExpression, StringOwnedSymbol};
+//! use std::fmt;
+//! 
+//! #[derive(Debug, Clone, PartialEq)]
+//! struct CustomSymbol {
+//!     name: String,
+//!     namespace: Option<String>,
+//! }
+//! 
+//! impl OwnedSymbol for CustomSymbol {
+//!     fn from_str(s: &str) -> Self {
+//!         if let Some((ns, name)) = s.split_once("::") {
+//!             CustomSymbol {
+//!                 name: name.to_string(),
+//!                 namespace: Some(ns.to_string()),
+//!             }
+//!         } else {
+//!             CustomSymbol {
+//!                 name: s.to_string(),
+//!                 namespace: None,
+//!             }
+//!         }
+//!     }
+//!     
+//!     fn display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//!         match &self.namespace {
+//!             Some(ns) => write!(f, "{}::{}", ns, self.name),
+//!             None => write!(f, "{}", self.name),
+//!         }
+//!     }
+//! }
+//! 
+//! // Use with custom symbol type
+//! let expr = OwnedExpression::<CustomSymbol>::Symbol(CustomSymbol::from_str("std::vector"));
+//! ```
+//! 
 //! ## Error Handling
 //! 
 //! ```rust
@@ -72,11 +114,11 @@
 //! ## Converting to Owned
 //! 
 //! ```rust
-//! use sexpression::{Expression, OwnedExpression};
+//! use sexpression::{Expression, OwnedExpression, StringOwnedSymbol, OwnedSymbol};
 //! 
 //! let borrowed = Expression::Symbol("hello");
-//! let owned = borrowed.to_owned();
-//! assert_eq!(owned, OwnedExpression::Symbol("hello".to_string()));
+//! let owned: OwnedExpression<StringOwnedSymbol> = borrowed.to_owned();
+//! assert_eq!(owned, OwnedExpression::Symbol(StringOwnedSymbol::from_str("hello")));
 //! ```
 
 pub mod reader;
@@ -85,6 +127,8 @@ pub mod reader;
 pub use crate::reader::{
     Expression,
     OwnedExpression, 
+    OwnedSymbol,
+    StringOwnedSymbol,
     ParseError,
     read,
     read_unchecked,
