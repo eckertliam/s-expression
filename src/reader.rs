@@ -407,17 +407,15 @@ fn parse<'a>(tokens: &mut &[&'a str]) -> Result<Expression<'a>, ParseError> {
 /// 
 /// The parsed atomic expression
 fn parse_atom(token: &str) -> Expression {
-    // Fast path: single character symbols
-    if token.len() == 1 {
-        return Expression::Symbol(token);
-    }
-    
     // Fast path: check first character for number parsing
     if let Some(first) = token.chars().next() {
         if first.is_ascii_digit() || first == '-' || first == '+' {
             if let Ok(n) = token.parse::<f64>() {
                 return Expression::Number(n);
             }
+        } else if token.len() == 1 {
+            // Fast path: single character symbols
+            return Expression::Symbol(token);
         }
     }
     
@@ -556,5 +554,20 @@ mod tests {
         }
         let duration = start.elapsed();
         println!("Parsed 1000 times in {:?}", duration);
+    }
+
+    #[test]
+    fn parsing_single_character_tokens() {
+        let (s, _) = read("(foo 1)").unwrap();
+        assert_eq!(
+            s,
+            Expression::List(vec![Expression::Symbol("foo"), Expression::Number(1.0)])
+        );
+
+        let (s, _) = read("(foo f)").unwrap();
+        assert_eq!(
+            s,
+            Expression::List(vec![Expression::Symbol("foo"), Expression::Symbol("f")])
+        );
     }
 }
